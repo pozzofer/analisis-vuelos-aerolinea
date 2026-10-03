@@ -1,0 +1,28 @@
+# Power BI: archivos locales y cachés (NO versionar)
+.pbi/
+**/.pbi/
+*.pbix.tmp
+cache.abf
+localSettings.json
+
+# Si guardas como .pbix, NO lo versiones en Git (binario pesado, no se puede comparar).
+# Usa el formato de proyecto (.pbip) y versiona sus carpetas de texto.
+*.pbix
+
+# Datos generados por la limpieza (se pueden regenerar desde data/raw)
+# Descomenta la siguiente línea si prefieres no versionar los procesados:
+# data/processed/*.csv
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+.vscode/
+.idea/
+
+# Python (si usas scripts de apoyo)
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
