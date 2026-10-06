@@ -1,111 +1,146 @@
 # Log de decisiones
 
-Registro de cada decisión que afecta los resultados. Regla de oro: **si cambia un número del informe, tiene que tener una entrada acá.**
+> **Regla:** si cambia un número del informe, tiene que tener una entrada acá. Las decisiones no se borran: si una se revierte, se agrega una nueva que la reemplace.
 
-**Estados:** 🟡 Propuesta (hay que confirmarla) · 🟢 Aceptada (ya aplicada en Power Query) · 🔴 Descartada/Reemplazada
+## Leyenda de estados
 
-> Las decisiones D-001 a D-010 vienen **propuestas** a partir del diagnóstico (`02_calidad_datos.md`). Léelas, cambia las que no compartas y, cuando las apliques en Power Query, pasa el estado a 🟢 y completa "Impacto real".
+| Estado | Significado |
+|---|---|
+| 🟢 Aceptada | Aplicada tal como se propuso |
+| 🟠 Aceptada con cambios | Aplicada, pero distinta de la propuesta original (se explica la diferencia) |
+| 🔴 No aplicada | La propuesta se descartó (se explica por qué) |
+| ✏️ Por confirmar | Falta verificar un dato antes de cerrarla |
 
----
+## Resumen
 
-## D-001 · Eliminar duplicados exactos 🟡
-- **Fecha:** 2026-10-03
-- **Problema:** Q-01. 30 filas repetidas idénticas en las 12 columnas (mismo `ID_Vuelo`, mismos datos).
-- **Decisión:** Eliminar duplicados considerando **todas las columnas**; conservar la primera aparición.
-- **Motivo:** Un vuelo no puede ocurrir dos veces con el mismo ID. Mantenerlos inflaría vuelos, ingresos y costos.
-- **Alternativas descartadas:** Deduplicar solo por `ID_Vuelo` (equivalente aquí, porque no hay IDs repetidos con datos distintos, pero menos seguro si el dato cambia).
-- **Impacto esperado:** 2.480 → 2.450 filas (−1,2 %).
-- **Impacto real:** ✏️
-- **Dónde se aplica:** Power Query, consulta `Vuelos_Staging`, paso `Eliminar duplicados exactos`.
-
-## D-002 · Unificar el formato de `Fecha` 🟡
-- **Problema:** Q-02. Dos formatos: `aaaa-mm-dd` (1.606) y `dd/mm/aaaa` (874).
-- **Decisión:** Convertir a tipo Fecha leyendo cada fila con su formato. Las fechas con `/` se interpretan como **día/mes/año**.
-- **Motivo:** Verificado que el orden cronológico de `ID_Vuelo` solo se cumple con día/mes (como mes/día, 534 fechas serían inválidas).
-- **Alternativas descartadas:** Cambiar la configuración regional de toda la consulta (arriesga convertir mal las fechas ISO).
-- **Cómo aplicarlo (columna personalizada en Power Query):**
-  ```m
-  // Fecha_Vuelo: ISO (aaaa-mm-dd) o dd/mm/aaaa; cualquier otra cosa queda en error visible
-  = try Date.FromText([Fecha], [Format="yyyy-MM-dd", Culture="es-AR"])
-    otherwise Date.FromText([Fecha], [Format="dd/MM/yyyy", Culture="es-AR"])
-  ```
-- **Control:** 0 errores; mín = 2024-01-01; máx = 2025-12-31.
-- **Impacto real:** ✏️
-
-## D-003 · Normalizar `Destino` usando `Ruta` como referencia 🟡
-- **Problema:** Q-03. 25 escrituras para 10 ciudades (`Bs As`, `BUENOS AIRES`, `Cordoba`, `San Miguel de Tucumán`, `Puerto Iguazú`…), 245 filas.
-- **Decisión:** Reconstruir `Destino` a partir de `Ruta` (parte posterior al guion).
-- **Motivo:** `Ruta` está limpia y es 100 % consistente con `Origen` + `Destino` normalizado. Evita mantener una tabla de reemplazos que se desactualiza.
-- **Alternativas descartadas:** Lista de "Reemplazar valores" (válida, pero hay que mantenerla a mano si aparecen variantes nuevas).
-- **Cómo aplicarlo:**
-  ```m
-  // Los nombres de ciudad no contienen guion, así que es seguro cortar en el primer "-"
-  = Text.AfterDelimiter([Ruta], "-")
-  ```
-- **Control:** `Destino` queda con exactamente 10 valores únicos.
-- **Impacto real:** ✏️
-
-## D-004 · Nulos en `Pasajeros` e `Ingresos`: no imputar 🟡
-- **Problema:** Q-04 y Q-05. 14 y 13 nulos, en vuelos no cancelados.
-- **Decisión:** Dejarlos como nulos. Excluir de cada ratio **solo la fila afectada** (ej. el factor de ocupación no cuenta esa fila ni en numerador ni en denominador).
-- **Motivo:** Son < 0,6 % de las filas; imputar inventaría datos y puede sesgar rutas con pocos vuelos.
-- **Alternativas descartadas:** Imputar con la media/mediana por ruta (introduce supuestos); eliminar la fila entera (pierde costo y estado válidos).
-- **Riesgo:** Si Power BI suma nulos como 0 en un cociente, sesga el resultado. Cuidar el DAX (ver `04_medidas_dax.md`).
-- **Impacto real:** ✏️
-
-## D-005 · Nulos en `Minutos_Demora`: inferir 0 solo si `Estado_Vuelo = "A tiempo"` 🟡
-- **Problema:** Q-06. 13 nulos: 10 en vuelos "A tiempo", 3 en "Demorado".
-- **Decisión:** Rellenar con 0 los nulos de vuelos "A tiempo". Dejar nulos los 3 de "Demorado".
-- **Motivo:** En todo el dataset, "A tiempo" siempre tiene demora 0 (regla verificada), así que es una inferencia determinista, no una estimación. En "Demorado" no se puede inferir el valor.
-- **Alternativas descartadas:** Imputar los 3 "Demorado" con la mediana (38 min): afectaría el promedio sin base.
-- **Impacto real:** ✏️
-
-## D-006 · Ingresos anómalos: marcar y excluir de métricas de ingresos 🟡
-- **Problema:** Q-07, Q-08, Q-09.
-  - AP-01172: ingreso **negativo** (−6.515.078), vuelo "A tiempo".
-  - AP-00722: ingreso **105.712.830** con 94 pasajeros → ≈ 1,12 M por pasajero, ~10× la mediana (≈ 113 mil). Sospecha: dígito de más.
-  - AP-00490 y AP-00753: "A tiempo" con **0 pasajeros e ingresos 0** y costo normal. Un vuelo operado vacío es raro.
-- **Decisión:** Crear dos columnas indicadoras: `Ingreso_Invalido` (Sí/No) y `Revisar` (Sí/No). Los dos casos con ingreso inválido (el negativo AP-01172 y el extremo AP-00722) se marcan en `Ingreso_Invalido` y se **excluyen de las métricas de ingresos y margen**, pero el vuelo se mantiene para conteos, puntualidad y costo. Los 2 vuelos vacíos se mantienen en todas las métricas y se marcan en `Revisar` para consultarlo con quien generó el dataset.
-- **Motivo:** Eliminar el vuelo perdería información válida; corregir el valor (dividir por 10) sería un supuesto sin respaldo.
-- **Alternativas descartadas:** Corregir AP-00722 dividiéndolo por 10; tomar el valor absoluto del negativo.
-- **Impacto esperado:** El valor extremo por sí solo suma ~95 M de más en `Buenos Aires-Iguazú`. Medir el margen total antes y después.
-- **Impacto real:** ✏️
-
-## D-007 · Definición de puntualidad: respetar `Estado_Vuelo` 🟡
-- **Problema:** Q-11. El estándar de la industria (A15) considera puntual hasta 15 min incluidos. En este dataset hay 16 vuelos "Demorado" con exactamente 15 min.
-- **Decisión:** Para el OTP principal usar `Estado_Vuelo = "A tiempo"` tal como viene. Dejar una medida alternativa `OTP A15` (demora ≤ 15) para comparación.
-- **Motivo:** El dato fuente ya clasifica; cambiarlo sin saber cómo lo generó el simulador sería arbitrario. La diferencia es chica (alrededor de 0,7 puntos de OTP).
-- **Alternativas descartadas:** Reclasificar los 16 vuelos como "A tiempo".
-- **Impacto real:** ✏️ (reportar ambos OTP)
-
-## D-008 · Demora promedio: reportar dos versiones 🟡
-- **Problema:** "Demora promedio" es ambigua. Con solo demorados = 49,31 min; con todos los operados = 9,04 min.
-- **Decisión:** Mostrar "Demora promedio de vuelos demorados" como métrica principal y la mediana al lado. Etiquetar siempre cuál es.
-- **Motivo:** Es más informativo para decidir qué hacer con las demoras; el promedio sobre todos los operados diluye el problema.
-- **Impacto real:** n/a (decisión de definición)
-
-## D-009 · Demoras extremas: mantener, no eliminar 🟡
-- **Problema:** Q-10. AP-01508 (688 min) y AP-00315 (512 min); el resto no pasa de 300.
-- **Decisión:** Mantenerlas (son demoras posibles, no errores evidentes) y apoyarse en la mediana. Mostrar el promedio sin ellas como control de sensibilidad (49,31 → 47,84 min con solo quitar la de 688).
-- **Alternativas descartadas:** Eliminarlas como outliers.
-- **Impacto real:** ✏️
-
-## D-010 · Importación del CSV (BOM y tipos) 🟡
-- **Problema:** Q-12. El archivo es UTF-8 con BOM; la 1ª columna puede importarse como `﻿ID_Vuelo`.
-- **Decisión:** Importar con origen de archivo **UTF-8 (65001)**, verificar que la 1ª columna se llame exactamente `ID_Vuelo` y renombrarla si no. `Pasajeros`, `Ingresos`, `Minutos_Demora` pasan a **Número entero**.
-- **Impacto real:** n/a
+| ID | Tema | Estado | Efecto en el dataset |
+|---|---|---|---|
+| D-001 | Duplicados exactos | 🟢 | 2.480 → 2.450 filas |
+| D-002 | Formato de fechas | 🟠 | Una sola columna de tipo Fecha |
+| D-003 | Destino desde `Ruta` | 🟢 | 25 variantes → 10 valores |
+| D-004 | Vacíos en `Pasajeros` e `Ingresos` | 🟠 | 2.450 → 2.423 filas |
+| D-005 | Vacíos en `Minutos_Demora` | 🟠 | 13 vacíos completados |
+| D-006 | Ingresos atípicos | 🔴 | Se conservan; efecto de 0,86 % en el margen |
+| D-007 | Definición de puntualidad | 🟠 | Se usa `Estado_Vuelo` |
+| D-008 | Demora promedio | 🟠 | Una sola versión (todos los operados) |
+| D-009 | Demoras extremas | 🟢 | Se conservan |
+| D-010 | Importación del CSV | 🟢 | Columnas importadas correctamente |
+| D-011 | Tratamiento de cancelados | 🟢 | Decisión propia |
+| D-012 | Cálculo de la ocupación | 🟢 | Decisión propia |
+| D-013 | Eje de fechas del gráfico mensual | 🟢 | Decisión técnica propia |
 
 ---
 
-## Plantilla para nuevas decisiones
+## D-001 · Duplicados exactos
 
-```
-## D-0XX · Título corto en forma de acción
-- **Fecha:**
-- **Problema:** qué dato/situación, cuántas filas.
-- **Decisión:** qué se hace exactamente.
-- **Motivo:** por qué esta opción.
-- **Alternativas descartadas:** y por qué.
-- **Impacto real:** filas afectadas y cómo cambió una métrica (antes → después).
-- **Dónde se aplica:** consulta y paso de Power Query / medida DAX.
-```
+- **Problema:** 30 filas idénticas a otras (mismo `ID_Vuelo` y mismos valores en todas las columnas). Ninguna tenía vacíos.
+- **Decisión:** eliminar los duplicados usando `ID_Vuelo` como clave y conservar la primera aparición. Como los 2.450 `ID_Vuelo` distintos coinciden con las 2.450 filas únicas, la clave elegida es equivalente a comparar la fila completa.
+- **Motivo:** un mismo vuelo contado dos veces infla vuelos, pasajeros, ingresos y costos.
+- **Alternativa descartada:** conservar los duplicados. Distorsiona todas las sumas.
+- **Impacto:** 2.480 → 2.450 filas (−1,21 %).
+- **Estado:** 🟢 Aceptada
+
+## D-002 · Formato de fechas
+
+- **Problema:** la columna `Fecha` mezcla `aaaa-mm-dd` (1.606 filas) y `dd/mm/aaaa` (874 filas). Con configuración regional de EE. UU., una fecha como `02/01/2024` se leería como 1 de febrero sin dar error.
+- **Decisión:** convertir la columna con la transformación **Analizar** de Power Query, en lugar de la fórmula condicional por formato que proponía la plantilla.
+- **Motivo:** resuelve ambos formatos en un solo paso, sin código adicional.
+- **Riesgo asumido:** la interpretación depende de la configuración regional. Se mitiga con verificaciones puntuales sobre vuelos cuya fecha es ambigua (día menor o igual a 12).
+- **Verificación realizada:** se comprobaron vuelos con fecha ambigua (día menor o igual a 12), como AP-00007 (02-01-2024) y AP-00333 (05-04-2024), y la columna quedó con las fechas correctas, sin errores.
+- **Alternativa descartada:** fórmula condicional con `Date.FromText` y formato explícito por cada caso (independiente de la configuración regional; más robusta, pero más larga).
+- **Estado:** 🟠 Aceptada con cambios
+
+## D-003 · Destino reconstruido desde `Ruta`
+
+- **Problema:** `Destino` tiene 25 variantes de escritura para 10 ciudades (por ejemplo "Bs As", "BUENOS AIRES", "Cordoba", "San Miguel de Tucumán"), en 245 filas.
+- **Decisión:** duplicar `Ruta`, dividir la copia por el guion, descartar la parte de origen, reemplazar la columna `Destino` original por la parte de destino y mantener `Ruta` intacta.
+- **Motivo:** `Ruta` es consistente en las 2.480 filas, así que es una fuente confiable y evita corregir variante por variante.
+- **Alternativa descartada:** reemplazar valores a mano. Funciona, pero es más largo y deja margen para olvidar variantes.
+- **Impacto:** `Destino` queda con exactamente 10 valores. Las 245 filas afectadas se corrigen sin perder ningún vuelo.
+- **Estado:** 🟢 Aceptada
+
+## D-004 · Vacíos en `Pasajeros` e `Ingresos`
+
+- **Problema:** `Pasajeros` tiene 14 vacíos e `Ingresos` tiene 13. No coinciden en ninguna fila: son 27 filas distintas (1,10 % de las 2.450).
+- **Propuesta original:** no imputar y excluir cada fila solo de la métrica donde falta el dato.
+- **Decisión aplicada:** eliminar las 27 filas.
+- **Motivo:** todas las métricas (ocupación, ingresos y margen) se calculan sobre exactamente el mismo conjunto de 2.423 vuelos, lo que las hace comparables entre sí. Al ser solo el 1,1 % del total, no se justifica inventar un valor.
+- **Alternativas descartadas:** (a) la propuesta original, que obliga a cada medida a filtrar sus propios vacíos y trabaja con conjuntos distintos según la métrica; (b) rellenar con el promedio de la ruta, que introduce un dato inventado.
+- **Impacto (comparación con la alternativa de conservar las filas):**
+
+| Métrica | Con las 27 filas eliminadas (aplicado) | Excluyendo vacíos por métrica |
+|---|---|---|
+| Margen total | $9.935,0 millones (2.423 vuelos) | $9.993,4 millones (2.437 vuelos con ingreso) |
+| Ocupación | 78,33 % | 78,36 % |
+
+  El margen es 0,58 % menor porque 14 de las filas eliminadas tenían ingresos válidos. No altera ninguna conclusión.
+- **Estado:** 🟠 Aceptada con cambios
+
+## D-005 · Vacíos en `Minutos_Demora`
+
+- **Problema:** 13 vacíos: 10 en vuelos "A tiempo" y 3 en vuelos "Demorado".
+- **Propuesta original:** completar con 0 los de vuelos "A tiempo" y dejar vacíos los 3 de vuelos "Demorado".
+- **Decisión aplicada:** completar con 0 los 10 vuelos "A tiempo" (se deduce del estado) y con **38 minutos** los 3 vuelos "Demorado". El valor 38 es la mediana de los vuelos demorados.
+- **Motivo:** un vuelo demorado no puede tener 0 minutos, y se prefiere la mediana a la media (49,3 min) porque la media está inflada por las demoras extremas de 512 y 688 minutos.
+- **Alternativas descartadas:** dejarlos vacíos (la propuesta, que complica las medidas de demora); usar la media (sesgada por los extremos); eliminarlos (se perdería un dato válido de vuelo demorado).
+- **Impacto:** la demora promedio de los vuelos operados es 9,04 min con los 3 valores estimados y 9,00 min sin ellos (diferencia de 0,04 min). Los 3 valores son estimaciones, no datos observados.
+- **Estado:** 🟠 Aceptada con cambios
+
+## D-006 · Ingresos atípicos
+
+- **Problema:** hay dos vuelos con ingresos fuera de lo normal: AP-01172, con ingreso negativo de −$6,5 millones (probable error de carga), y AP-00722, con $105,7 millones (≈10 veces lo habitual en su ruta, tipo chárter). Además hay dos vuelos "A tiempo" con 0 pasajeros (AP-00490 y AP-00753).
+- **Propuesta original:** marcar los registros sospechosos con un indicador y excluirlos de las métricas de ingresos y margen sin borrarlos.
+- **Decisión aplicada:** no marcarlos ni excluirlos. Se conservan tal como vienen.
+- **Motivo:** la consigna de análisis estadístico pide detectarlos y decidir caso por caso (media vs. mediana, valores atípicos). Excluirlos antes del análisis eliminaría el material de estudio. Se tratan en la sección de valores atípicos del informe.
+- **Impacto:** si se excluyeran los dos vuelos de ingresos atípicos, el margen total bajaría de $9.935,0 millones a $9.849,6 millones (−$85,4 millones; −0,86 %). Las conclusiones por ruta no cambian.
+- **Alternativa descartada:** indicador `Caso_Atipico` con exclusión selectiva (propuesta). Queda como mejora posible.
+- **Estado:** 🔴 No aplicada
+
+## D-007 · Definición de puntualidad
+
+- **Decisión aplicada:** la puntualidad se calcula como vuelos con `Estado_Vuelo = "A tiempo"` sobre vuelos operados (excluye cancelados). No se construyó la variante paralela de la propuesta (OTP A15).
+- **Nota sobre el umbral:** en este dataset todo vuelo "Demorado" tiene al menos 15 minutos. Por eso, definir "puntual" como demora menor a 15 min coincide con el estado (81,68 %). Si se definiera como demora de 15 min o menos, subiría a 82,36 %.
+- **Estado:** 🟠 Aceptada con cambios
+
+## D-008 · Demora promedio
+
+- **Propuesta original:** reportar dos versiones, una solo sobre vuelos demorados y otra sobre todos los operados, con etiquetas claras.
+- **Decisión aplicada:** se reporta una sola versión, sobre **todos los vuelos operados** (incluye los puntuales con 0 min y excluye cancelados). Es la que usa el gráfico de demora por origen. Valor general: 9,04 min.
+- **Referencia de la otra versión:** entre los vuelos demorados, la media es 49,3 min y la mediana 38 min.
+- **Estado:** 🟠 Aceptada con cambios
+
+## D-009 · Demoras extremas
+
+- **Problema:** dos vuelos con demoras de 512 min (AP-00315) y 688 min (AP-01508), ambos con origen en Buenos Aires.
+- **Decisión:** conservarlos y usar la mediana como control.
+- **Motivo:** son datos válidos del dataset y se analizan como valores atípicos. Su efecto es limitado.
+- **Impacto:** la demora promedio de los operados baja de 9,04 a 8,54 min si se excluyen. El ranking de orígenes con más demora (Ushuaia y Bariloche primero) no cambia. La mediana de demora de los vuelos operados es 0 min, porque la mayoría sale a tiempo.
+- **Estado:** 🟢 Aceptada
+
+## D-010 · Importación del CSV
+
+- **Propuesta:** importar en UTF-8, verificar que el nombre de la primera columna sea `ID_Vuelo` (el archivo tiene BOM, que puede alterarlo) y convertir las columnas numéricas a entero.
+- **Aplicado:** el CSV se importó en UTF-8 y los nombres de las columnas, incluida la primera (`ID_Vuelo`), quedaron correctos. Los tipos finales de cada columna figuran en `01_diccionario_datos.md`.
+- **Estado:** 🟢 Aceptada
+
+## D-011 · Tratamiento de los vuelos cancelados
+
+- **Decisión:** los cancelados **entran al margen** y **salen de ocupación, puntualidad y demora**.
+- **Motivo:** un vuelo cancelado tiene costo y no genera ingresos, por lo que es una pérdida real (48 cancelados en la tabla final). En cambio, no puede estar "vacío" ni "a tiempo", porque no despegó; incluirlo bajaría la ocupación y distorsionaría la medición de cómo se llenan los aviones.
+- **Alternativa descartada:** incluirlos en todas las métricas. Mezcla dos fenómenos distintos (cuán llenos van los aviones y cuántos vuelos se cancelan).
+- **Impacto:** la ocupación sería 76,78 % con cancelados y 78,33 % sin ellos. La puntualidad sería 80,07 % con cancelados y 81,68 % sin ellos.
+- **Estado:** 🟢 Aceptada
+
+## D-012 · Cálculo de la ocupación
+
+- **Decisión:** la ocupación se calcula como Σ Pasajeros ÷ Σ Capacidad, no como el promedio de los porcentajes de cada vuelo.
+- **Motivo:** pondera cada vuelo por sus asientos, de modo que un avión grande pesa más que uno chico. Es la forma habitual en el sector.
+- **Impacto:** 78,33 % con esta definición, contra 77,23 % si se promediaran los porcentajes por vuelo.
+- **Estado:** 🟢 Aceptada
+
+## D-013 · Eje de fechas del gráfico mensual
+
+- **Problema:** Power BI agrega automáticamente una jerarquía de fechas (año, trimestre, mes, día) al campo `Mes_inicio`, y el gráfico agrupaba por nombre de mes, mezclando 2024 y 2025 en 12 puntos.
+- **Decisión:** desactivar la opción "Fecha y hora automáticas" del archivo y usar `Mes_inicio` como eje continuo, con interpolación recta (sin suavizado).
+- **Motivo:** el gráfico debe mostrar los 24 meses por separado para ver la estacionalidad en cada año, y el forecast se calcula sobre los puntos reales.
+- **Estado:** 🟢 Aceptada
