@@ -6,20 +6,17 @@
 
 Una aerolínea nacional (ficticia) necesita optimizar su operación de vuelos. Se dispone de 2 años de operación simulada en 36 rutas entre 10 ciudades, con 3 tipos de avión.
 
-## 2. Pregunta de negocio ✏️
-
-"Optimizar vuelos" es demasiado amplio. Elige **una pregunta principal** y hasta dos secundarias. Candidatas que el dataset permite responder:
+## 2. Pregunta de negocio 
 
 - [ ] ¿Qué rutas son rentables y cuáles no? (ingresos vs. costo por ruta)
 - [ ] ¿Está el tipo de avión asignado correctamente a cada ruta? (ocupación según capacidad)
 - [ ] ¿Dónde y cuándo se concentran las demoras y cancelaciones?
 - [ ] ¿Hay estacionalidad en la demanda (pasajeros por mes)?
 
-**Pregunta principal elegida:** ✏️ _______________________________________________
 
-**Decisión que se tomaría con la respuesta:** ✏️ (ej. "recortar frecuencias en rutas con margen negativo", "cambiar Boeing por Embraer en rutas con ocupación < 60 %")
+**Decisión que se tomaría con la respuesta:** 
+- que rutas reforzar, reducir o rediseñar para la proxima temporada
 
-**¿Quién la pregunta?** ✏️ (ej. Gerencia de Planificación de Red)
 
 ## 3. Alcance
 
@@ -32,22 +29,40 @@ Una aerolínea nacional (ficticia) necesita optimizar su operación de vuelos. S
 
 ## 4. Métricas y definiciones exactas
 
-Una métrica sin definición exacta no es comparable. Estas son las propuestas; **confírmalas o ajústalas** y mantenlas idénticas en Power BI (`04_medidas_dax.md`).
+## 4. Métricas y definiciones exactas
 
-| Métrica | Definición propuesta | Tratamiento de casos especiales |
+Estas son las definiciones implementadas en Power BI (ver `04_medidas_dax.md`).
+Moneda: pesos argentinos (supuesto, dataset simulado).
+
+### KPIs principales 
+
+| Métrica | Definición | Tratamiento de casos especiales | Valor de control |
+|---|---|---|---|
+| **Margen total** | Σ Ingresos – Σ Costo_Vuelo. Se calcula por vuelo (columna `Margen`) y se suma. | Los cancelados **sí entran**: tienen costo y no ingreso, por lo que son una pérdida real. Los casos atípicos de ingresos (chárter, ingreso negativo) se conservan; ver D-006. | ≈ $9.935 millones |
+| **Ocupación %** | Σ Pasajeros / Σ Capacidad | Excluye cancelados: un vuelo que no despegó no estuvo "vacío". Se pondera por asientos (no es el promedio de porcentajes por vuelo). | 78,33 % |
+| **Puntualidad %** | Vuelos con `Estado_Vuelo = "A tiempo"` / vuelos operados | Excluye cancelados del denominador. Se usa `Estado_Vuelo` como fuente (ver D-007). | 81,68 % |
+
+### Métricas de apoyo 
+
+| Métrica | Definición | Tratamiento de casos especiales |
 |---|---|---|
-| **Vuelos programados** | Cantidad de filas únicas (tras eliminar duplicados) | Incluye cancelados |
-| **Vuelos operados** | Programados – cancelados | |
-| **Tasa de cancelación** | Cancelados / Programados | |
-| **Puntualidad (OTP)** | Operados con `Estado_Vuelo = "A tiempo"` / Operados | Excluye cancelados del denominador. Ver D-007 sobre el umbral de 15 min |
-| **Demora promedio (min)** | Promedio de `Minutos_Demora` | Decidir: ¿solo vuelos demorados o todos los operados? Ver D-008 |
-| **Factor de ocupación** | Σ Pasajeros / Σ Capacidad | Solo vuelos operados con `Pasajeros` no nulo |
-| **Ingresos** | Σ `Ingresos` | Moneda: ✏️ confirmar (supuesto: pesos argentinos) |
-| **Costo** | Σ `Costo_Vuelo` | Los cancelados sí tienen costo (ver diccionario) |
-| **Margen** | Ingresos – Costo | Puede ser negativo |
-| **Margen %** | Margen / Ingresos | |
-| **Ingreso por pasajero** | Σ Ingresos / Σ Pasajeros | |
-| **Costo por asiento ofrecido** | Σ Costo / Σ Capacidad | Aproxima el CASK sin distancia (el dataset no tiene km) |
+| **Demora promedio (min)** | Promedio de `Minutos_Demora` | Sobre **todos los vuelos operados** (incluye los puntuales, con 0 min); excluye cancelados (ver D-008). Conserva las demoras extremas de 512 y 688 min (D-009). |
+| **Costo promedio por vuelo** | Promedio de `Costo_Vuelo` | Se usa para comprobar si las rutas que pierden plata tienen un costo mayor o si la causa es la baja ocupación. |
+
+### Conceptos auxiliares
+
+| Concepto | Definición |
+|---|---|
+| **Vuelo programado** | Fila única tras eliminar duplicados. Incluye cancelados. |
+| **Vuelo operado** | Programado menos cancelado. |
+| **Ruta dirigida** | A→B y B→A son rutas distintas (36 rutas). |
+
+### Criterios transversales
+
+- **Cancelados:** entran al margen (son pérdida) y salen de ocupación, puntualidad y demora (miden vuelos que despegaron).
+- **Nulos en `Pasajeros` e `Ingresos`:** se eliminaron 27 filas (1,1 % de las 2.450 únicas). Queda un dataset de **2.423 filas**. Diferencia respecto de D-004, registrada en `03_log_decisiones.md`.
+- **Nulos en `Minutos_Demora`:** 10 vuelos "A tiempo" completados con 0; 3 vuelos "Demorado" completados con 38 min (mediana de los demorados). Diferencia respecto de D-005.
+
 
 ## 5. Supuestos y limitaciones iniciales
 
