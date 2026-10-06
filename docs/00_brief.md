@@ -27,7 +27,6 @@ Una aerolínea nacional (ficticia) necesita optimizar su operación de vuelos. S
 | Granularidad | 1 fila = 1 vuelo |
 | Fuera de alcance | Combustible por separado, tarifas por clase, tripulación, mantenimiento, datos externos (clima, feriados) — el dataset no los incluye |
 
-## 4. Métricas y definiciones exactas
 
 ## 4. Métricas y definiciones exactas
 
@@ -78,12 +77,3 @@ Moneda: pesos argentinos (supuesto, dataset simulado).
 - [ ] Documentación completa (esta carpeta `docs/`)
 - [ ] Informe/resumen ejecutivo (`outputs/informes/`)
 
-## 7. Plan
-
-| Hito | Fecha objetivo |
-|---|---|
-| Brief cerrado | ✏️ |
-| Limpieza terminada y cuadrada con cifras de control | ✏️ |
-| Modelo + medidas DAX | ✏️ |
-| Dashboard v1 | ✏️ |
-| Conclusiones y entrega | ✏️ |
